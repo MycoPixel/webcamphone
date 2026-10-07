@@ -88,9 +88,9 @@ class MainActivity : ComponentActivity() {
 }
 
 enum class CameraResolution(val label: String, val size: Size) {
-    RES_480P("480p (640x480)", Size(640, 480)),
-    RES_720P("720p (1280x720)", Size(1280, 720)),
-    RES_1080P("1080p (1920x1080)", Size(1920, 1080))
+    RES_480P("480p", Size(640, 480)),
+    RES_720P("720p", Size(1280, 720)),
+    RES_1080P("1080p", Size(1920, 1080))
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -110,6 +110,7 @@ fun WebcamMainScreen(webcamServer: WebcamServer, modifier: Modifier = Modifier) 
     var selectedResolution by remember { mutableStateOf(CameraResolution.RES_720P) }
     var brightness by remember { mutableStateOf(0f) } // -100 to 100
     var contrast by remember { mutableStateOf(1.0f) } // 0.5 to 2.0
+    var rotationDegrees by remember { mutableStateOf(0) } // 0, 90, 180, 270
     var isGrayscale by remember { mutableStateOf(false) }
     var isMirrored by remember { mutableStateOf(false) }
     var showSettings by remember { mutableStateOf(false) }
@@ -128,7 +129,6 @@ fun WebcamMainScreen(webcamServer: WebcamServer, modifier: Modifier = Modifier) 
         }
     }
 
-    // Re-bind camera when resolution or lensFacing changes
     LaunchedEffect(lensFacing, selectedResolution) {
         val cameraProviderFuture = ProcessCameraProvider.getInstance(context)
         cameraProviderFuture.addListener({
@@ -161,7 +161,8 @@ fun WebcamMainScreen(webcamServer: WebcamServer, modifier: Modifier = Modifier) 
                         brightness = brightness,
                         contrast = contrast,
                         grayscale = isGrayscale,
-                        mirror = isMirrored
+                        mirror = isMirrored,
+                        rotationDegrees = rotationDegrees
                     )
                     if (jpegBytes != null) {
                         webcamServer.updateFrame(jpegBytes)
@@ -268,7 +269,23 @@ fun WebcamMainScreen(webcamServer: WebcamServer, modifier: Modifier = Modifier) 
                             FilterChip(
                                 selected = selectedResolution == res,
                                 onClick = { selectedResolution = res },
-                                label = { Text(res.name) }
+                                label = { Text(res.label) }
+                            )
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(8.dp))
+                    // Rotation Selector
+                    Text(text = "Rotation", style = MaterialTheme.typography.bodySmall)
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceEvenly
+                    ) {
+                        listOf(0, 90, 180, 270).forEach { deg ->
+                            FilterChip(
+                                selected = rotationDegrees == deg,
+                                onClick = { rotationDegrees = deg },
+                                label = { Text("$deg°") }
                             )
                         }
                     }
@@ -302,7 +319,7 @@ fun WebcamMainScreen(webcamServer: WebcamServer, modifier: Modifier = Modifier) 
                         }
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Checkbox(checked = isMirrored, onCheckedChange = { isMirrored = it })
-                            Text(text = "Mirror Horizontal", style = MaterialTheme.typography.bodyMedium)
+                            Text(text = "Mirror", style = MaterialTheme.typography.bodyMedium)
                         }
                     }
                 }
@@ -449,7 +466,8 @@ fun imageProxyToJpegBytes(
     brightness: Float,
     contrast: Float,
     grayscale: Boolean,
-    mirror: Boolean
+    mirror: Boolean,
+    rotationDegrees: Int
 ): ByteArray? {
     return try {
         val plane = image.planes[0]
@@ -477,8 +495,8 @@ fun imageProxyToJpegBytes(
         }
         bitmap.setPixels(pixels, 0, width, 0, 0, width, height)
 
-        // Apply processing (brightness, contrast, grayscale, mirror)
-        val processedBitmap = processBitmap(bitmap, brightness, contrast, grayscale, mirror)
+        // Apply processing (rotation, brightness, contrast, grayscale, mirror)
+        val processedBitmap = processBitmap(bitmap, brightness, contrast, grayscale, mirror, rotationDegrees)
         if (processedBitmap != bitmap) {
             bitmap.recycle()
         }
@@ -493,13 +511,19 @@ fun imageProxyToJpegBytes(
     }
 }
 
-fun processBitmap(source: Bitmap, brightness: Float, contrast: Float, grayscale: Boolean, mirror: Boolean): Bitmap {
-    val matrix = android.graphics.Matrix()
-    if (mirror) {
-        matrix.postScale(-1f, 1f, source.width / 2f, source.height / 2f)
-    }
+fun processBitmap(
+    source: Bitmap,
+    brightness: Float,
+    contrast: Float,
+    grayscale: Boolean,
+    mirror: Boolean,
+    rotationDegrees: Int
+): Bitmap {
+    val isSwapped = rotationDegrees == 90 || rotationDegrees == 270
+    val targetWidth = if (isSwapped) source.height else source.width
+    val targetHeight = if (isSwapped) source.width else source.height
 
-    val bmp = Bitmap.createBitmap(source.width, source.height, Bitmap.Config.ARGB_8888)
+    val bmp = Bitmap.createBitmap(targetWidth, targetHeight, Bitmap.Config.ARGB_8888)
     val canvas = Canvas(bmp)
     val paint = Paint()
 
@@ -535,6 +559,17 @@ fun processBitmap(source: Bitmap, brightness: Float, contrast: Float, grayscale:
     }
 
     paint.colorFilter = ColorMatrixColorFilter(colorMatrix)
+
+    val matrix = android.graphics.Matrix()
+    matrix.postTranslate(-source.width / 2f, -source.height / 2f)
+    if (rotationDegrees != 0) {
+        matrix.postRotate(rotationDegrees.toFloat())
+    }
+    if (mirror) {
+        matrix.postScale(-1f, 1f)
+    }
+    matrix.postTranslate(targetWidth / 2f, targetHeight / 2f)
+
     canvas.drawBitmap(source, matrix, paint)
     return bmp
 }
