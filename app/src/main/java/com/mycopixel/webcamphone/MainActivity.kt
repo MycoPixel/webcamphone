@@ -3,16 +3,25 @@ package com.mycopixel.webcamphone
 import android.Manifest
 import android.content.Context
 import android.content.pm.PackageManager
+import android.graphics.Bitmap
+import android.graphics.Canvas
+import android.graphics.ColorMatrix
+import android.graphics.ColorMatrixColorFilter
+import android.graphics.Paint
 import android.net.wifi.WifiManager
 import android.os.Bundle
 import android.util.Log
+import android.util.Size
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.camera.core.*
+import androidx.camera.core.resolutionselector.ResolutionSelector
+import androidx.camera.core.resolutionselector.ResolutionStrategy
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
@@ -78,6 +87,13 @@ class MainActivity : ComponentActivity() {
     }
 }
 
+enum class CameraResolution(val label: String, val size: Size) {
+    RES_480P("480p (640x480)", Size(640, 480)),
+    RES_720P("720p (1280x720)", Size(1280, 720)),
+    RES_1080P("1080p (1920x1080)", Size(1920, 1080))
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun WebcamMainScreen(webcamServer: WebcamServer, modifier: Modifier = Modifier) {
     val context = LocalContext.current
@@ -89,6 +105,14 @@ fun WebcamMainScreen(webcamServer: WebcamServer, modifier: Modifier = Modifier) 
     var lensFacing by remember { mutableStateOf(CameraSelector.LENS_FACING_BACK) }
     var isTorchOn by remember { mutableStateOf(false) }
     var cameraControl by remember { mutableStateOf<CameraControl?>(null) }
+
+    // Advanced settings state
+    var selectedResolution by remember { mutableStateOf(CameraResolution.RES_720P) }
+    var brightness by remember { mutableStateOf(0f) } // -100 to 100
+    var contrast by remember { mutableStateOf(1.0f) } // 0.5 to 2.0
+    var isGrayscale by remember { mutableStateOf(false) }
+    var isMirrored by remember { mutableStateOf(false) }
+    var showSettings by remember { mutableStateOf(false) }
 
     val ipAddress = remember { getLocalIpAddress(context) }
     val cameraExecutor = remember { Executors.newSingleThreadExecutor() }
@@ -104,7 +128,8 @@ fun WebcamMainScreen(webcamServer: WebcamServer, modifier: Modifier = Modifier) 
         }
     }
 
-    LaunchedEffect(lensFacing) {
+    // Re-bind camera when resolution or lensFacing changes
+    LaunchedEffect(lensFacing, selectedResolution) {
         val cameraProviderFuture = ProcessCameraProvider.getInstance(context)
         cameraProviderFuture.addListener({
             val provider = cameraProviderFuture.get()
@@ -114,14 +139,30 @@ fun WebcamMainScreen(webcamServer: WebcamServer, modifier: Modifier = Modifier) 
                 it.setSurfaceProvider(previewView.surfaceProvider)
             }
 
+            val resolutionSelector = ResolutionSelector.Builder()
+                .setResolutionStrategy(
+                    ResolutionStrategy(
+                        selectedResolution.size,
+                        ResolutionStrategy.FALLBACK_RULE_CLOSEST_LOWER
+                    )
+                )
+                .build()
+
             val imageAnalysis = ImageAnalysis.Builder()
+                .setResolutionSelector(resolutionSelector)
                 .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
                 .setOutputImageFormat(ImageAnalysis.OUTPUT_IMAGE_FORMAT_RGBA_8888)
                 .build()
 
             imageAnalysis.setAnalyzer(cameraExecutor) { imageProxy ->
                 if (webcamServer.running) {
-                    val jpegBytes = imageProxyToJpegBytes(imageProxy)
+                    val jpegBytes = imageProxyToJpegBytes(
+                        image = imageProxy,
+                        brightness = brightness,
+                        contrast = contrast,
+                        grayscale = isGrayscale,
+                        mirror = isMirrored
+                    )
                     if (jpegBytes != null) {
                         webcamServer.updateFrame(jpegBytes)
                     }
@@ -157,14 +198,25 @@ fun WebcamMainScreen(webcamServer: WebcamServer, modifier: Modifier = Modifier) 
             .padding(16.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        Text(
-            text = "WebcamPhone",
-            style = MaterialTheme.typography.headlineMedium,
-            fontWeight = FontWeight.Bold,
-            color = MaterialTheme.colorScheme.primary
-        )
-        Spacer(modifier = Modifier.height(12.dp))
+        // App Title & Settings Toggle
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = "WebcamPhone",
+                style = MaterialTheme.typography.headlineMedium,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.primary
+            )
+            IconButton(onClick = { showSettings = !showSettings }) {
+                Icon(imageVector = Icons.Default.Settings, contentDescription = "Settings")
+            }
+        }
+        Spacer(modifier = Modifier.height(8.dp))
 
+        // Status Card
         Card(
             modifier = Modifier.fillMaxWidth(),
             colors = CardDefaults.cardColors(
@@ -194,12 +246,76 @@ fun WebcamMainScreen(webcamServer: WebcamServer, modifier: Modifier = Modifier) 
             }
         }
 
-        Spacer(modifier = Modifier.height(16.dp))
+        Spacer(modifier = Modifier.height(12.dp))
 
+        // Advanced Settings Panel (Collapsible)
+        AnimatedVisibility(visible = showSettings) {
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
+            ) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Text(text = "Camera & Image Settings", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleMedium)
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    // Resolution Selector
+                    Text(text = "Resolution", style = MaterialTheme.typography.bodySmall)
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceEvenly
+                    ) {
+                        CameraResolution.values().forEach { res ->
+                            FilterChip(
+                                selected = selectedResolution == res,
+                                onClick = { selectedResolution = res },
+                                label = { Text(res.name) }
+                            )
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(8.dp))
+                    // Brightness Slider
+                    Text(text = "Brightness: ${brightness.toInt()}", style = MaterialTheme.typography.bodySmall)
+                    Slider(
+                        value = brightness,
+                        onValueChange = { brightness = it },
+                        valueRange = -100f..100f
+                    )
+
+                    // Contrast Slider
+                    Text(text = "Contrast: %.1fx".format(contrast), style = MaterialTheme.typography.bodySmall)
+                    Slider(
+                        value = contrast,
+                        onValueChange = { contrast = it },
+                        valueRange = 0.5f..2.0f
+                    )
+
+                    // Toggles (Grayscale & Mirror)
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Checkbox(checked = isGrayscale, onCheckedChange = { isGrayscale = it })
+                            Text(text = "Grayscale", style = MaterialTheme.typography.bodyMedium)
+                        }
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Checkbox(checked = isMirrored, onCheckedChange = { isMirrored = it })
+                            Text(text = "Mirror Horizontal", style = MaterialTheme.typography.bodyMedium)
+                        }
+                    }
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(12.dp))
+
+        // Camera Preview Box
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(300.dp)
+                .height(280.dp)
                 .clip(RoundedCornerShape(16.dp))
                 .background(Color.Black)
         ) {
@@ -211,6 +327,7 @@ fun WebcamMainScreen(webcamServer: WebcamServer, modifier: Modifier = Modifier) 
 
         Spacer(modifier = Modifier.height(16.dp))
 
+        // Control Buttons Row
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceEvenly
@@ -264,8 +381,9 @@ fun WebcamMainScreen(webcamServer: WebcamServer, modifier: Modifier = Modifier) 
             }
         }
 
-        Spacer(modifier = Modifier.height(24.dp))
+        Spacer(modifier = Modifier.height(20.dp))
 
+        // Connection Instructions Card
         Card(
             modifier = Modifier.fillMaxWidth(),
             colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
@@ -326,7 +444,13 @@ fun getLocalIpAddress(context: Context): String {
     return "127.0.0.1"
 }
 
-fun imageProxyToJpegBytes(image: ImageProxy): ByteArray? {
+fun imageProxyToJpegBytes(
+    image: ImageProxy,
+    brightness: Float,
+    contrast: Float,
+    grayscale: Boolean,
+    mirror: Boolean
+): ByteArray? {
     return try {
         val plane = image.planes[0]
         val buffer = plane.buffer
@@ -335,7 +459,7 @@ fun imageProxyToJpegBytes(image: ImageProxy): ByteArray? {
         val pixelStride = plane.pixelStride
         val rowStride = plane.rowStride
 
-        val bitmap = android.graphics.Bitmap.createBitmap(width, height, android.graphics.Bitmap.Config.ARGB_8888)
+        val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
         buffer.rewind()
         val rowData = ByteArray(rowStride)
         val pixels = IntArray(width * height)
@@ -353,12 +477,64 @@ fun imageProxyToJpegBytes(image: ImageProxy): ByteArray? {
         }
         bitmap.setPixels(pixels, 0, width, 0, 0, width, height)
 
+        // Apply processing (brightness, contrast, grayscale, mirror)
+        val processedBitmap = processBitmap(bitmap, brightness, contrast, grayscale, mirror)
+        if (processedBitmap != bitmap) {
+            bitmap.recycle()
+        }
+
         val out = ByteArrayOutputStream()
-        bitmap.compress(android.graphics.Bitmap.CompressFormat.JPEG, 70, out)
-        bitmap.recycle()
+        processedBitmap.compress(Bitmap.CompressFormat.JPEG, 75, out)
+        processedBitmap.recycle()
         out.toByteArray()
     } catch (e: Exception) {
-        Log.e("MainActivity", "Failed to convert image", e)
+        Log.e("MainActivity", "Failed to convert and process image", e)
         null
     }
+}
+
+fun processBitmap(source: Bitmap, brightness: Float, contrast: Float, grayscale: Boolean, mirror: Boolean): Bitmap {
+    val matrix = android.graphics.Matrix()
+    if (mirror) {
+        matrix.postScale(-1f, 1f, source.width / 2f, source.height / 2f)
+    }
+
+    val bmp = Bitmap.createBitmap(source.width, source.height, Bitmap.Config.ARGB_8888)
+    val canvas = Canvas(bmp)
+    val paint = Paint()
+
+    val colorMatrix = ColorMatrix()
+
+    // Contrast
+    val scale = contrast
+    val translate = (-0.5f * scale + 0.5f) * 255f
+    val contrastMatrix = ColorMatrix(floatArrayOf(
+        scale, 0f, 0f, 0f, translate,
+        0f, scale, 0f, 0f, translate,
+        0f, 0f, scale, 0f, translate,
+        0f, 0f, 0f, 1f, 0f
+    ))
+    colorMatrix.postConcat(contrastMatrix)
+
+    // Brightness
+    if (brightness != 0f) {
+        val brightnessMatrix = ColorMatrix(floatArrayOf(
+            1f, 0f, 0f, 0f, brightness,
+            0f, 1f, 0f, 0f, brightness,
+            0f, 0f, 1f, 0f, brightness,
+            0f, 0f, 0f, 1f, 0f
+        ))
+        colorMatrix.postConcat(brightnessMatrix)
+    }
+
+    // Grayscale
+    if (grayscale) {
+        val grayMatrix = ColorMatrix()
+        grayMatrix.setSaturation(0f)
+        colorMatrix.postConcat(grayMatrix)
+    }
+
+    paint.colorFilter = ColorMatrixColorFilter(colorMatrix)
+    canvas.drawBitmap(source, matrix, paint)
+    return bmp
 }
