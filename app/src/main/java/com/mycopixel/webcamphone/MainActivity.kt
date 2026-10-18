@@ -45,7 +45,6 @@ import com.mycopixel.webcamphone.ui.theme.WebcamPhoneTheme
 import kotlinx.coroutines.delay
 import kotlin.time.Duration.Companion.seconds
 import java.io.ByteArrayOutputStream
-import java.net.InetAddress
 import java.net.NetworkInterface
 import java.util.Locale
 import java.util.concurrent.Executors
@@ -118,8 +117,10 @@ fun WebcamMainScreen(webcamServer: WebcamServer, modifier: Modifier = Modifier) 
 
     val ipAddress = remember { getLocalIpAddress(context) }
     val cameraExecutor = remember { Executors.newSingleThreadExecutor() }
+    DisposableEffect(Unit) {
+        onDispose { cameraExecutor.shutdown() }
+    }
 
-    var cameraProvider by remember { mutableStateOf<ProcessCameraProvider?>(null) }
     val previewView = remember { PreviewView(context) }
 
     LaunchedEffect(Unit) {
@@ -134,7 +135,6 @@ fun WebcamMainScreen(webcamServer: WebcamServer, modifier: Modifier = Modifier) 
         val cameraProviderFuture = ProcessCameraProvider.getInstance(context)
         cameraProviderFuture.addListener({
             val provider = cameraProviderFuture.get()
-            cameraProvider = provider
 
             val preview = Preview.Builder().build().also {
                 it.surfaceProvider = previewView.surfaceProvider
@@ -301,7 +301,7 @@ fun WebcamMainScreen(webcamServer: WebcamServer, modifier: Modifier = Modifier) 
                     )
 
                     // Contrast Slider
-                    Text(text = "Contrast: %.1fx".format(contrast), style = MaterialTheme.typography.bodySmall)
+                    Text(text = String.format(Locale.US, "Contrast: %.1fx", contrast), style = MaterialTheme.typography.bodySmall)
                     Slider(
                         value = contrast,
                         onValueChange = { contrast = it },
@@ -453,7 +453,7 @@ fun getLocalIpAddress(context: Context): String {
             val addresses = networkInterface.inetAddresses
             while (addresses.hasMoreElements()) {
                 val address = addresses.nextElement()
-                if (!address.isLoopbackAddress && address is InetAddress && address.hostAddress?.indexOf(':') == -1) {
+                if (!address.isLoopbackAddress && address.hostAddress?.indexOf(':') == -1) {
                     return address.hostAddress ?: "127.0.0.1"
                 }
             }
