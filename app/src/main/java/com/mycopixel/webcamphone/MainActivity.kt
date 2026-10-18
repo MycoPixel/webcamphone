@@ -36,18 +36,20 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalLifecycleOwner
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
 import com.mycopixel.webcamphone.ui.theme.WebcamPhoneTheme
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.launch
+import kotlin.time.Duration.Companion.seconds
 import java.io.ByteArrayOutputStream
 import java.net.InetAddress
 import java.net.NetworkInterface
+import java.util.Locale
 import java.util.concurrent.Executors
+import androidx.core.graphics.createBitmap
 
 class MainActivity : ComponentActivity() {
 
@@ -93,7 +95,6 @@ enum class CameraResolution(val label: String, val size: Size) {
     RES_1080P("1080p", Size(1920, 1080))
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun WebcamMainScreen(webcamServer: WebcamServer, modifier: Modifier = Modifier) {
     val context = LocalContext.current
@@ -101,16 +102,16 @@ fun WebcamMainScreen(webcamServer: WebcamServer, modifier: Modifier = Modifier) 
     val scope = rememberCoroutineScope()
 
     var isRunning by remember { mutableStateOf(webcamServer.running) }
-    var clientCount by remember { mutableStateOf(webcamServer.connectedClients) }
-    var lensFacing by remember { mutableStateOf(CameraSelector.LENS_FACING_BACK) }
+    var clientCount by remember { mutableIntStateOf(webcamServer.connectedClients) }
+    var lensFacing by remember { mutableIntStateOf(CameraSelector.LENS_FACING_BACK) }
     var isTorchOn by remember { mutableStateOf(false) }
     var cameraControl by remember { mutableStateOf<CameraControl?>(null) }
 
     // Advanced settings state
     var selectedResolution by remember { mutableStateOf(CameraResolution.RES_720P) }
-    var brightness by remember { mutableStateOf(0f) } // -100 to 100
-    var contrast by remember { mutableStateOf(1.0f) } // 0.5 to 2.0
-    var rotationDegrees by remember { mutableStateOf(0) } // 0, 90, 180, 270
+    var brightness by remember { mutableFloatStateOf(0f) } // -100 to 100
+    var contrast by remember { mutableFloatStateOf(1.0f) } // 0.5 to 2.0
+    var rotationDegrees by remember { mutableIntStateOf(0) } // 0, 90, 180, 270
     var isGrayscale by remember { mutableStateOf(false) }
     var isMirrored by remember { mutableStateOf(false) }
     var showSettings by remember { mutableStateOf(false) }
@@ -125,7 +126,7 @@ fun WebcamMainScreen(webcamServer: WebcamServer, modifier: Modifier = Modifier) 
         while (true) {
             isRunning = webcamServer.running
             clientCount = webcamServer.connectedClients
-            delay(1000)
+            delay(1.seconds)
         }
     }
 
@@ -136,7 +137,7 @@ fun WebcamMainScreen(webcamServer: WebcamServer, modifier: Modifier = Modifier) 
             cameraProvider = provider
 
             val preview = Preview.Builder().build().also {
-                it.setSurfaceProvider(previewView.surfaceProvider)
+                it.surfaceProvider = previewView.surfaceProvider
             }
 
             val resolutionSelector = ResolutionSelector.Builder()
@@ -265,7 +266,7 @@ fun WebcamMainScreen(webcamServer: WebcamServer, modifier: Modifier = Modifier) 
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceEvenly
                     ) {
-                        CameraResolution.values().forEach { res ->
+                        CameraResolution.entries.forEach { res ->
                             FilterChip(
                                 selected = selectedResolution == res,
                                 onClick = { selectedResolution = res },
@@ -431,12 +432,14 @@ fun WebcamMainScreen(webcamServer: WebcamServer, modifier: Modifier = Modifier) 
     }
 }
 
+@Suppress("DEPRECATION")
 fun getLocalIpAddress(context: Context): String {
     try {
         val wifiManager = context.applicationContext.getSystemService(Context.WIFI_SERVICE) as? WifiManager
         val ipAddress = wifiManager?.connectionInfo?.ipAddress ?: 0
         if (ipAddress != 0) {
             return String.format(
+                Locale.US,
                 "%d.%d.%d.%d",
                 (ipAddress and 0xff),
                 (ipAddress shr 8 and 0xff),
@@ -446,12 +449,12 @@ fun getLocalIpAddress(context: Context): String {
         }
         val interfaces = NetworkInterface.getNetworkInterfaces()
         while (interfaces.hasMoreElements()) {
-            val intf = interfaces.nextElement()
-            val addrs = intf.inetAddresses
-            while (addrs.hasMoreElements()) {
-                val addr = addrs.nextElement()
-                if (!addr.isLoopbackAddress && addr is InetAddress && addr.hostAddress?.indexOf(':') == -1) {
-                    return addr.hostAddress ?: "127.0.0.1"
+            val networkInterface = interfaces.nextElement()
+            val addresses = networkInterface.inetAddresses
+            while (addresses.hasMoreElements()) {
+                val address = addresses.nextElement()
+                if (!address.isLoopbackAddress && address is InetAddress && address.hostAddress?.indexOf(':') == -1) {
+                    return address.hostAddress ?: "127.0.0.1"
                 }
             }
         }
@@ -477,12 +480,12 @@ fun imageProxyToJpegBytes(
         val pixelStride = plane.pixelStride
         val rowStride = plane.rowStride
 
-        val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+        val bitmap = createBitmap(width, height, Bitmap.Config.ARGB_8888)
         buffer.rewind()
         val rowData = ByteArray(rowStride)
         val pixels = IntArray(width * height)
         var offset = 0
-        for (r in 0 until height) {
+        repeat(height) {
             buffer.get(rowData, 0, rowStride)
             for (c in 0 until width) {
                 val idx = c * pixelStride
@@ -523,7 +526,7 @@ fun processBitmap(
     val targetWidth = if (isSwapped) source.height else source.width
     val targetHeight = if (isSwapped) source.width else source.height
 
-    val bmp = Bitmap.createBitmap(targetWidth, targetHeight, Bitmap.Config.ARGB_8888)
+    val bmp = createBitmap(targetWidth, targetHeight, Bitmap.Config.ARGB_8888)
     val canvas = Canvas(bmp)
     val paint = Paint()
 

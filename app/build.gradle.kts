@@ -6,7 +6,7 @@ plugins {
 
 android {
     namespace = "com.mycopixel.webcamphone"
-    compileSdk = 34
+    compileSdk = 37
 
     defaultConfig {
         applicationId = "com.mycopixel.webcamphone"
@@ -39,12 +39,13 @@ java {
 }
 
 dependencies {
-    val cameraxVersion = "1.4.1"
+    val cameraxVersion = "1.6.2"
     implementation("androidx.camera:camera-core:$cameraxVersion")
     implementation("androidx.camera:camera-camera2:$cameraxVersion")
     implementation("androidx.camera:camera-lifecycle:$cameraxVersion")
     implementation("androidx.camera:camera-view:$cameraxVersion")
-    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.11.0")
+    implementation("androidx.compose.material:material-icons-extended")
 
     implementation(platform(libs.androidx.compose.bom))
     implementation(libs.androidx.activity.compose)

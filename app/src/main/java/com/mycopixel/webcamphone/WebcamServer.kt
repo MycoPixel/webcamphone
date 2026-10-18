@@ -4,9 +4,9 @@ import android.util.Log
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
-import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlin.time.Duration.Companion.milliseconds
 import java.io.OutputStream
 import java.net.ServerSocket
 import java.net.Socket
@@ -40,7 +40,7 @@ class WebcamServer(private val port: Int = 8080) {
                 isRunning.set(true)
                 Log.d("WebcamServer", "Server started on port $port")
 
-                while (isRunning.get() && serverSocket?.isClosed == false) {
+                while (isRunning.get() && (serverSocket?.isClosed == false)) {
                     try {
                         val socket = serverSocket?.accept() ?: break
                         clientCount.incrementAndGet()
@@ -82,12 +82,12 @@ class WebcamServer(private val port: Int = 8080) {
                 // Serve HTML by default
                 serveHtmlPage(output)
             }
-        } catch (e: Exception) {
+        } catch (_: Exception) {
             // Client disconnected or timeout
         } finally {
             try {
                 socket.close()
-            } catch (ignored: Exception) {}
+            } catch (_: Exception) {}
             clientCount.decrementAndGet()
         }
     }
@@ -140,12 +140,12 @@ class WebcamServer(private val port: Int = 8080) {
                         output.write(frame)
                         output.write("\r\n".toByteArray())
                         output.flush()
-                    } catch (e: Exception) {
+                    } catch (_: Exception) {
                         // Client closed connection
                         break
                     }
                 }
-                kotlinx.coroutines.delay(50) // ~20 fps max streaming rate
+                kotlinx.coroutines.delay(50.milliseconds) // ~20 fps max streaming rate
             }
         }
     }
@@ -158,7 +158,7 @@ class WebcamServer(private val port: Int = 8080) {
         isRunning.set(false)
         try {
             serverSocket?.close()
-        } catch (e: Exception) {}
+        } catch (_: Exception) {}
         serverSocket = null
         serverJob?.cancel()
         serverJob = null
